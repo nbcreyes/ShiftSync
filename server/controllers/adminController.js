@@ -3,15 +3,14 @@ const TimeLog = require('../models/TimeLog')
 const Break = require('../models/Break')
 const Tenant = require('../models/Tenant')
 const ShiftSchedule = require('../models/ShiftSchedule')
+const { createAuditLog } = require('./auditController')
 const { toZonedTime, format } = require('date-fns-tz')
 
-// ─── Get All Users in Workspace ───────────────────────────────────────────────
+// ─── Get All Users ────────────────────────────────────────────────────────────
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find({
-      tenantId: req.tenantId,
-    }).select('-passwordHash -refreshToken')
-
+    const users = await User.find({ tenantId: req.tenantId })
+      .select('-passwordHash -refreshToken')
     return res.status(200).json(users)
   } catch (error) {
     console.error('GetUsers error:', error.message)
@@ -23,11 +22,7 @@ const getUsers = async (req, res) => {
 const getWorkspace = async (req, res) => {
   try {
     const tenant = await Tenant.findById(req.tenantId)
-
-    if (!tenant) {
-      return res.status(404).json({ message: 'Workspace not found' })
-    }
-
+    if (!tenant) return res.status(404).json({ message: 'Workspace not found' })
     return res.status(200).json({
       companyName: tenant.companyName,
       timezone: tenant.timezone || 'UTC',
@@ -38,7 +33,7 @@ const getWorkspace = async (req, res) => {
   }
 }
 
-// ─── Update Role (owner only) ─────────────────────────────────────────────────
+// ─── Update Role ──────────────────────────────────────────────────────────────
 const updateRole = async (req, res) => {
   try {
     const { role } = req.body
@@ -49,17 +44,25 @@ const updateRole = async (req, res) => {
     }
 
     const user = await User.findOne({ _id: id, tenantId: req.tenantId })
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' })
-    }
-
+    if (!user) return res.status(404).json({ message: 'User not found' })
     if (user.role === 'owner') {
       return res.status(403).json({ message: 'Cannot change the role of the workspace owner' })
     }
 
+    const previousRole = user.role
     user.role = role
     await user.save()
+
+    await createAuditLog({
+      tenantId: req.tenantId,
+      performedBy: req.user._id,
+      action: 'member_role_changed',
+      targetType: 'user',
+      targetId: user._id,
+      targetUser: user._id,
+      description: `Changed ${user.name}'s role from ${previousRole} to ${role}`,
+      meta: { previousRole, newRole: role },
+    })
 
     return res.status(200).json({
       message: `User role updated to ${role}`,
@@ -71,23 +74,29 @@ const updateRole = async (req, res) => {
   }
 }
 
-// ─── Deactivate User (owner only) ─────────────────────────────────────────────
+// ─── Deactivate User ──────────────────────────────────────────────────────────
 const deactivateUser = async (req, res) => {
   try {
     const { id } = req.params
 
     const user = await User.findOne({ _id: id, tenantId: req.tenantId })
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' })
-    }
-
+    if (!user) return res.status(404).json({ message: 'User not found' })
     if (user.role === 'owner') {
       return res.status(403).json({ message: 'Cannot deactivate the workspace owner' })
     }
 
     user.isActive = !user.isActive
     await user.save()
+
+    await createAuditLog({
+      tenantId: req.tenantId,
+      performedBy: req.user._id,
+      action: user.isActive ? 'member_activated' : 'member_deactivated',
+      targetType: 'user',
+      targetId: user._id,
+      targetUser: user._id,
+      description: `${user.isActive ? 'Activated' : 'Deactivated'} account for ${user.name}`,
+    })
 
     return res.status(200).json({
       message: `User ${user.isActive ? 'activated' : 'deactivated'} successfully`,
@@ -99,20 +108,26 @@ const deactivateUser = async (req, res) => {
   }
 }
 
-// ─── Delete User (owner only) ─────────────────────────────────────────────────
+// ─── Delete User ──────────────────────────────────────────────────────────────
 const deleteUser = async (req, res) => {
   try {
     const { id } = req.params
 
     const user = await User.findOne({ _id: id, tenantId: req.tenantId })
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' })
-    }
-
+    if (!user) return res.status(404).json({ message: 'User not found' })
     if (user.role === 'owner') {
       return res.status(403).json({ message: 'Cannot delete the workspace owner' })
     }
+
+    await createAuditLog({
+      tenantId: req.tenantId,
+      performedBy: req.user._id,
+      action: 'member_deleted',
+      targetType: 'user',
+      targetId: user._id,
+      description: `Deleted member ${user.name} (${user.email})`,
+      meta: { name: user.name, email: user.email, role: user.role },
+    })
 
     await user.deleteOne()
 
@@ -123,20 +138,16 @@ const deleteUser = async (req, res) => {
   }
 }
 
-// ─── Get Timelog for a Specific User ─────────────────────────────────────────
+// ─── Get User Timelog ─────────────────────────────────────────────────────────
 const getUserTimelog = async (req, res) => {
   try {
     const { userId } = req.params
     const { startDate, endDate, page = 1, limit = 10 } = req.query
 
     const user = await User.findOne({ _id: userId, tenantId: req.tenantId })
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' })
-    }
+    if (!user) return res.status(404).json({ message: 'User not found' })
 
     const query = { tenantId: req.tenantId, userId }
-
     if (startDate || endDate) {
       query.date = {}
       if (startDate) query.date.$gte = startDate
@@ -166,10 +177,7 @@ const getUserTimelog = async (req, res) => {
 const getLiveBoard = async (req, res) => {
   try {
     const { timezone } = req.query
-
-    if (!timezone) {
-      return res.status(400).json({ message: 'Timezone is required' })
-    }
+    if (!timezone) return res.status(400).json({ message: 'Timezone is required' })
 
     const now = new Date()
     const zoned = toZonedTime(now, timezone)
@@ -210,10 +218,7 @@ const getLiveBoard = async (req, res) => {
 const exportCSV = async (req, res) => {
   try {
     const { userId, startDate, endDate, timezone } = req.query
-
-    if (!timezone) {
-      return res.status(400).json({ message: 'Timezone is required' })
-    }
+    if (!timezone) return res.status(400).json({ message: 'Timezone is required' })
 
     const query = { tenantId: req.tenantId }
     if (userId) query.userId = userId
@@ -238,7 +243,6 @@ const exportCSV = async (req, res) => {
         ? (new Date(log.timeOut) - new Date(log.timeIn)) / 60000
         : null
       const workedMins = totalMins !== null ? totalMins - log.totalBreakMins : null
-
       return [
         log.userId?.name || '',
         log.userId?.email || '',
@@ -270,7 +274,6 @@ const exportCSV = async (req, res) => {
 const updateWorkspace = async (req, res) => {
   try {
     const { companyName, timezone } = req.body
-
     if (!companyName && !timezone) {
       return res.status(400).json({ message: 'Nothing to update' })
     }
@@ -280,10 +283,17 @@ const updateWorkspace = async (req, res) => {
     if (timezone) updates.timezone = timezone
 
     const tenant = await Tenant.findByIdAndUpdate(req.tenantId, updates, { new: true })
+    if (!tenant) return res.status(404).json({ message: 'Workspace not found' })
 
-    if (!tenant) {
-      return res.status(404).json({ message: 'Workspace not found' })
-    }
+    await createAuditLog({
+      tenantId: req.tenantId,
+      performedBy: req.user._id,
+      action: 'workspace_updated',
+      targetType: 'workspace',
+      targetId: req.tenantId,
+      description: `Updated workspace settings`,
+      meta: updates,
+    })
 
     return res.status(200).json({
       message: 'Workspace updated',
@@ -300,7 +310,6 @@ const updateWorkspace = async (req, res) => {
 const getSummaryReport = async (req, res) => {
   try {
     const { startDate, endDate, timezone } = req.query
-
     if (!startDate || !endDate || !timezone) {
       return res.status(400).json({ message: 'startDate, endDate, and timezone are required' })
     }
@@ -316,11 +325,7 @@ const getSummaryReport = async (req, res) => {
       date: { $gte: startDate, $lte: endDate },
     })
 
-    const schedules = await ShiftSchedule.find({
-      tenantId: req.tenantId,
-      isActive: true,
-    })
-
+    const schedules = await ShiftSchedule.find({ tenantId: req.tenantId, isActive: true })
     const scheduleMap = {}
     schedules.forEach((s) => { scheduleMap[s.userId.toString()] = s })
 
@@ -348,37 +353,24 @@ const getSummaryReport = async (req, res) => {
     const report = users.map((user) => {
       const uid = user._id.toString()
       const schedule = scheduleMap[uid]
-
-      let daysPresent = 0
-      let daysAbsent = 0
-      let daysLate = 0
-      let totalWorkedMins = 0
-      let totalBreakMins = 0
-      let overtimeDays = 0
+      let daysPresent = 0, daysAbsent = 0, daysLate = 0
+      let totalWorkedMins = 0, totalBreakMins = 0, overtimeDays = 0
 
       dates.forEach((date) => {
         if (date > today) return
-
         const isWorkDay = schedule
           ? schedule.workDays.includes(new Date(date + 'T12:00:00').getDay())
           : true
-
         if (!isWorkDay) return
 
         const log = logMap[`${uid}__${date}`]
-
-        if (!log) {
-          if (schedule) daysAbsent++
-          return
-        }
+        if (!log) { if (schedule) daysAbsent++; return }
 
         daysPresent++
-
         if (log.timeOut) {
           const worked = (new Date(log.timeOut) - new Date(log.timeIn)) / 60000 - log.totalBreakMins
           totalWorkedMins += Math.max(0, worked)
         }
-
         totalBreakMins += log.totalBreakMins || 0
         if (log.overtime) overtimeDays++
 
@@ -391,35 +383,20 @@ const getSummaryReport = async (req, res) => {
       })
 
       const scheduledDays = schedule
-        ? dates.filter(
-            (d) =>
-              d <= today &&
-              schedule.workDays.includes(new Date(d + 'T12:00:00').getDay())
-          ).length
+        ? dates.filter((d) => d <= today && schedule.workDays.includes(new Date(d + 'T12:00:00').getDay())).length
         : dates.filter((d) => d <= today).length
 
-      const attendanceRate =
-        scheduledDays > 0 ? Math.round((daysPresent / scheduledDays) * 100) : null
+      const attendanceRate = scheduledDays > 0
+        ? Math.round((daysPresent / scheduledDays) * 100)
+        : null
 
       return {
-        user: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          department: user.department,
-        },
-        daysPresent,
-        daysAbsent,
-        daysLate,
-        overtimeDays,
+        user: { _id: user._id, name: user.name, email: user.email, department: user.department },
+        daysPresent, daysAbsent, daysLate, overtimeDays,
         totalWorkedHours: parseFloat((totalWorkedMins / 60).toFixed(1)),
-        avgWorkedHours:
-          daysPresent > 0
-            ? parseFloat((totalWorkedMins / 60 / daysPresent).toFixed(1))
-            : 0,
+        avgWorkedHours: daysPresent > 0 ? parseFloat((totalWorkedMins / 60 / daysPresent).toFixed(1)) : 0,
         totalBreakMins: Math.round(totalBreakMins),
-        attendanceRate,
-        scheduledDays,
+        attendanceRate, scheduledDays,
       }
     })
 
@@ -434,16 +411,11 @@ const getSummaryReport = async (req, res) => {
 const getDepartmentReport = async (req, res) => {
   try {
     const { startDate, endDate, timezone } = req.query
-
     if (!startDate || !endDate || !timezone) {
       return res.status(400).json({ message: 'startDate, endDate, and timezone are required' })
     }
 
-    const users = await User.find({
-      tenantId: req.tenantId,
-      isActive: true,
-    }).select('name department')
-
+    const users = await User.find({ tenantId: req.tenantId, isActive: true }).select('name department')
     const logs = await TimeLog.find({
       tenantId: req.tenantId,
       date: { $gte: startDate, $lte: endDate },
@@ -453,18 +425,10 @@ const getDepartmentReport = async (req, res) => {
     users.forEach((u) => { userDeptMap[u._id.toString()] = u.department || 'Unassigned' })
 
     const deptMap = {}
-
     logs.forEach((log) => {
       const dept = userDeptMap[log.userId.toString()] || 'Unassigned'
       if (!deptMap[dept]) {
-        deptMap[dept] = {
-          department: dept,
-          totalLogs: 0,
-          totalWorkedMins: 0,
-          totalBreakMins: 0,
-          overtimeDays: 0,
-          memberCount: 0,
-        }
+        deptMap[dept] = { department: dept, totalLogs: 0, totalWorkedMins: 0, totalBreakMins: 0, overtimeDays: 0, memberCount: 0 }
       }
       deptMap[dept].totalLogs++
       if (log.timeOut) {
@@ -478,14 +442,7 @@ const getDepartmentReport = async (req, res) => {
     users.forEach((u) => {
       const dept = u.department || 'Unassigned'
       if (!deptMap[dept]) {
-        deptMap[dept] = {
-          department: dept,
-          totalLogs: 0,
-          totalWorkedMins: 0,
-          totalBreakMins: 0,
-          overtimeDays: 0,
-          memberCount: 0,
-        }
+        deptMap[dept] = { department: dept, totalLogs: 0, totalWorkedMins: 0, totalBreakMins: 0, overtimeDays: 0, memberCount: 0 }
       }
       deptMap[dept].memberCount++
     })
@@ -493,10 +450,7 @@ const getDepartmentReport = async (req, res) => {
     const result = Object.values(deptMap).map((d) => ({
       ...d,
       totalWorkedHours: parseFloat((d.totalWorkedMins / 60).toFixed(1)),
-      avgWorkedHoursPerLog:
-        d.totalLogs > 0
-          ? parseFloat((d.totalWorkedMins / 60 / d.totalLogs).toFixed(1))
-          : 0,
+      avgWorkedHoursPerLog: d.totalLogs > 0 ? parseFloat((d.totalWorkedMins / 60 / d.totalLogs).toFixed(1)) : 0,
     }))
 
     return res.status(200).json(result)
@@ -512,20 +466,19 @@ const adminEditLog = async (req, res) => {
     const { logId } = req.params
     const { timeIn, timeOut, adminNote } = req.body
 
-    const log = await TimeLog.findOne({
-      _id: logId,
-      tenantId: req.tenantId,
-    })
+    const log = await TimeLog.findOne({ _id: logId, tenantId: req.tenantId })
+    if (!log) return res.status(404).json({ message: 'Log not found' })
 
-    if (!log) {
-      return res.status(404).json({ message: 'Log not found' })
+    const previous = {
+      timeIn: log.timeIn,
+      timeOut: log.timeOut,
+      adminNote: log.adminNote,
     }
 
     if (timeIn) log.timeIn = new Date(timeIn)
     if (timeOut) log.timeOut = new Date(timeOut)
     if (adminNote !== undefined) log.adminNote = adminNote
 
-    // Recalculate overtime
     if (log.timeIn && log.timeOut) {
       const totalMins = (new Date(log.timeOut) - new Date(log.timeIn)) / 60000
       const workedMins = totalMins - (log.totalBreakMins || 0)
@@ -533,6 +486,17 @@ const adminEditLog = async (req, res) => {
     }
 
     await log.save()
+
+    await createAuditLog({
+      tenantId: req.tenantId,
+      performedBy: req.user._id,
+      action: 'log_edited',
+      targetType: 'timelog',
+      targetId: log._id,
+      targetUser: log.userId,
+      description: `Edited time log for ${log.date}`,
+      meta: { previous, updated: { timeIn, timeOut, adminNote } },
+    })
 
     return res.status(200).json(log)
   } catch (error) {

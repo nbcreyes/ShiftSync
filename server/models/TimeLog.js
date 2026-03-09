@@ -28,6 +28,11 @@ const timeLogSchema = new mongoose.Schema({
     trim: true,
     default: null,
   },
+  adminNote: {
+    type: String,
+    trim: true,
+    default: null,
+  },
   totalBreakMins: {
     type: Number,
     default: 0,
@@ -56,7 +61,6 @@ const timeLogSchema = new mongoose.Schema({
   },
 })
 
-// Enforce one active session per user per day
 timeLogSchema.index({ tenantId: 1, userId: 1, date: 1 }, { unique: true })
 
 module.exports = mongoose.model('TimeLog', timeLogSchema)

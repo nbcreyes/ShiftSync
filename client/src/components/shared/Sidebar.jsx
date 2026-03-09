@@ -10,6 +10,9 @@ import {
   ShieldCheck,
   BarChart3,
   UserCircle,
+  AlertTriangle,
+  Umbrella,
+  Shield,
 } from 'lucide-react'
 import useAuthStore from '../../store/authStore'
 import { logout } from '../../api/auth'
@@ -30,6 +33,8 @@ const Sidebar = () => {
   const employeeLinks = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/dashboard/history', label: 'History', icon: History },
+    { to: '/dashboard/flags', label: 'My Flags', icon: AlertTriangle },
+    { to: '/dashboard/leave', label: 'Leave', icon: Umbrella },
     { to: '/profile', label: 'Profile', icon: UserCircle },
   ]
 
@@ -38,6 +43,9 @@ const Sidebar = () => {
     { to: '/admin/timesheets', label: 'Timesheets', icon: CalendarDays },
     { to: '/admin/invites', label: 'Invites', icon: UserPlus },
     { to: '/admin/reports', label: 'Reports', icon: BarChart3 },
+    { to: '/admin/leave', label: 'Leave', icon: Umbrella },
+    { to: '/admin/audit', label: 'Audit Log', icon: Shield },
+    { to: '/dashboard/flags', label: 'My Flags', icon: AlertTriangle },
     { to: '/profile', label: 'Profile', icon: UserCircle },
   ]
 
@@ -47,6 +55,9 @@ const Sidebar = () => {
     { to: '/admin/invites', label: 'Invites', icon: UserPlus },
     { to: '/admin/reports', label: 'Reports', icon: BarChart3 },
     { to: '/admin/members', label: 'Members', icon: Users },
+    { to: '/admin/leave', label: 'Leave', icon: Umbrella },
+    { to: '/admin/audit', label: 'Audit Log', icon: Shield },
+    { to: '/dashboard/flags', label: 'My Flags', icon: AlertTriangle },
     { to: '/profile', label: 'Profile', icon: UserCircle },
   ]
 

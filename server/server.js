@@ -4,13 +4,15 @@ const cors = require('cors')
 const cookieParser = require('cookie-parser')
 const connectDB = require('./config/db')
 const seedSuperuser = require('./scripts/seedSuperuser')
+const { startDigestJobs } = require('./jobs/digestJob')
 
 const app = express()
 
-// Connect to MongoDB then seed superuser
-connectDB().then(() => seedSuperuser())
+connectDB().then(() => {
+  seedSuperuser()
+  startDigestJobs()
+})
 
-// Middleware
 app.use(cors({
   origin: process.env.CLIENT_URL,
   credentials: true,
@@ -18,7 +20,6 @@ app.use(cors({
 app.use(express.json())
 app.use(cookieParser())
 
-// Routes
 app.use('/api/auth', require('./routes/auth'))
 app.use('/api/invite', require('./routes/invite'))
 app.use('/api/timelog', require('./routes/timelog'))
@@ -28,8 +29,9 @@ app.use('/api/superuser', require('./routes/superuser'))
 app.use('/api/notification', require('./routes/notification'))
 app.use('/api/manual-log', require('./routes/manualLog'))
 app.use('/api/shift', require('./routes/shift'))
+app.use('/api/leave', require('./routes/leave'))
+app.use('/api/audit', require('./routes/audit'))
 
-// Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', project: 'ShiftSync' })
 })

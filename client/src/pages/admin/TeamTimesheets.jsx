@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Download, Flag, AlertTriangle, Clock, Pencil } from 'lucide-react'
+import { Download, Flag, AlertTriangle, Clock, Pencil, CheckSquare, Square, X } from 'lucide-react'
 import { getUsers, getUserTimelog, exportCSV, adminEditLog } from '../../api/admin'
 import { getFlags } from '../../api/shift'
 import { createRemark, getRemarkById, getAllRemarks } from '../../api/remark'
@@ -43,17 +43,37 @@ const getDefaultRange = () => {
   return { startDate: toISO(start), endDate: toISO(end) }
 }
 
-// Convert "HH:mm" + date string into full ISO
 const toISO = (date, time) => {
   if (!date || !time) return null
   return new Date(`${date}T${time}:00`).toISOString()
 }
 
-// Extract "HH:mm" from ISO string
 const toHHMM = (iso) => {
   if (!iso) return ''
   const d = new Date(iso)
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+const buildCSV = (logs, userName) => {
+  const header = 'Name,Date,Time In,Time Out,Break Mins,Hours Worked,Overtime,Status,Note'
+  const rows = logs.map((log) => {
+    const workedMins = log.timeOut
+      ? (new Date(log.timeOut) - new Date(log.timeIn)) / 60000 - log.totalBreakMins
+      : null
+    const fmt = (iso) => iso ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : ''
+    return [
+      userName || '',
+      log.date,
+      fmt(log.timeIn),
+      fmt(log.timeOut),
+      Math.round(log.totalBreakMins),
+      workedMins !== null ? (workedMins / 60).toFixed(2) : '',
+      log.overtime ? 'Yes' : 'No',
+      log.status,
+      log.adminNote || log.employeeNote || '',
+    ].join(',')
+  })
+  return [header, ...rows].join('\n')
 }
 
 const TeamTimesheets = () => {
@@ -76,6 +96,12 @@ const TeamTimesheets = () => {
   const [editForm, setEditForm] = useState({ timeIn: '', timeOut: '', adminNote: '' })
   const [saving, setSaving] = useState(false)
 
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [bulkFlagModal, setBulkFlagModal] = useState(false)
+  const [bulkNote, setBulkNote] = useState('')
+  const [bulkFlagging, setBulkFlagging] = useState(false)
+
   useEffect(() => {
     const fetchUsers = async () => {
       try {
@@ -91,6 +117,7 @@ const TeamTimesheets = () => {
   const fetchLogs = async (userId, page = 1) => {
     if (!userId) return
     setLoading(true)
+    setSelectedIds(new Set())
     try {
       const res = await getUserTimelog(userId, { ...filters, page, limit: 15 })
       setLogs(res.data.logs)
@@ -110,9 +137,7 @@ const TeamTimesheets = () => {
         (flag) => flag.userId?._id === userId || flag.userId === userId
       )
       setFlags(filtered)
-    } catch {
-      // Flags are optional — fail silently
-    }
+    } catch {}
   }
 
   const handleUserSelect = (userId) => {
@@ -121,6 +146,7 @@ const TeamTimesheets = () => {
     setSelectedUser(u)
     setLogs([])
     setFlags([])
+    setSelectedIds(new Set())
     fetchLogs(u._id)
     fetchFlagsForUser(u._id)
   }
@@ -183,7 +209,6 @@ const TeamTimesheets = () => {
       toast.error('Time In is required')
       return
     }
-
     setSaving(true)
     try {
       const payload = {
@@ -191,13 +216,11 @@ const TeamTimesheets = () => {
         timeOut: editForm.timeOut ? toISO(editModal.date, editForm.timeOut) : undefined,
         adminNote: editForm.adminNote,
       }
-
       if (payload.timeOut && payload.timeOut <= payload.timeIn) {
         toast.error('Time Out must be after Time In')
         setSaving(false)
         return
       }
-
       await adminEditLog(editModal._id, payload)
       toast.success('Log updated')
       setEditModal(null)
@@ -209,15 +232,56 @@ const TeamTimesheets = () => {
     }
   }
 
-  // Build flag lookup map: date -> flag
+  // ─── Bulk helpers ─────────────────────────────────────────────────────────
+  const selectableLogs = logs.filter((l) => l.timeOut)
+  const allSelected = selectableLogs.length > 0 && selectableLogs.every((l) => selectedIds.has(l._id))
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(selectableLogs.map((l) => l._id)))
+    }
+  }
+
+  const toggleOne = (id) => {
+    const next = new Set(selectedIds)
+    next.has(id) ? next.delete(id) : next.add(id)
+    setSelectedIds(next)
+  }
+
+  const handleBulkExport = () => {
+    const selected = logs.filter((l) => selectedIds.has(l._id))
+    const csv = buildCSV(selected, selectedUser?.name)
+    downloadCSVBlob(csv, `${selectedUser?.name}-selected-logs.csv`)
+    toast.success(`Exported ${selected.length} log${selected.length > 1 ? 's' : ''}`)
+  }
+
+  const handleBulkFlag = async () => {
+    if (!bulkNote.trim()) return
+    setBulkFlagging(true)
+    const selected = logs.filter((l) => selectedIds.has(l._id) && l.status === 'clean')
+    try {
+      await Promise.all(selected.map((log) => createRemark(log._id, bulkNote)))
+      toast.success(`Flagged ${selected.length} log${selected.length > 1 ? 's' : ''}`)
+      setBulkFlagModal(false)
+      setBulkNote('')
+      setSelectedIds(new Set())
+      fetchLogs(selectedUser._id, pagination.page)
+    } catch {
+      toast.error('Failed to bulk flag logs')
+    } finally {
+      setBulkFlagging(false)
+    }
+  }
+
+  // ─── Build rows ───────────────────────────────────────────────────────────
   const flagMap = {}
   flags.forEach((f) => { flagMap[f.date] = f })
 
-  // Absent flags with no corresponding log
   const logDates = new Set(logs.map((l) => l.date))
   const absentOnlyFlags = flags.filter((f) => f.type === 'absent' && !logDates.has(f.date))
 
-  // Combined rows
   const rows = [
     ...logs.map((log) => ({ type: 'log', log, flag: flagMap[log.date] || null })),
     ...absentOnlyFlags.map((f) => ({ type: 'absent', flag: f })),
@@ -229,6 +293,7 @@ const TeamTimesheets = () => {
 
   const filteredRows = showFlagsOnly ? rows.filter((r) => r.flag) : rows
   const flagCount = rows.filter((r) => r.flag).length
+  const cleanSelected = logs.filter((l) => selectedIds.has(l._id) && l.status === 'clean').length
 
   return (
     <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950">
@@ -310,12 +375,58 @@ const TeamTimesheets = () => {
             </div>
           )}
 
+          {/* Bulk action bar */}
+          {selectedIds.size > 0 && (
+            <div className="flex items-center justify-between bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-2xl px-5 py-3.5">
+              <div className="flex items-center gap-2.5">
+                <CheckSquare size={15} className="text-brand-500 shrink-0" />
+                <p className="text-sm font-semibold text-brand-800 dark:text-brand-300">
+                  {selectedIds.size} log{selectedIds.size > 1 ? 's' : ''} selected
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {cleanSelected > 0 && (
+                  <button
+                    onClick={() => setBulkFlagModal(true)}
+                    className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white transition-colors"
+                  >
+                    <Flag size={12} />
+                    Flag {cleanSelected}
+                  </button>
+                )}
+                <button
+                  onClick={handleBulkExport}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors"
+                >
+                  <Download size={12} />
+                  Export {selectedIds.size}
+                </button>
+                <button
+                  onClick={() => setSelectedIds(new Set())}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-brand-500 hover:bg-brand-100 dark:hover:bg-brand-900/30 transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Table */}
           <div className="card shadow-soft overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 dark:border-slate-700/60">
+                    <th className="px-4 py-3 w-10">
+                      {selectableLogs.length > 0 && (
+                        <button onClick={toggleAll} className="text-slate-400 hover:text-brand-500 transition-colors">
+                          {allSelected
+                            ? <CheckSquare size={15} className="text-brand-500" />
+                            : <Square size={15} />
+                          }
+                        </button>
+                      )}
+                    </th>
                     {['Date', 'In', 'Out', 'Break', 'Worked', 'Flags', 'Status', 'Note', ''].map((h) => (
                       <th
                         key={h}
@@ -329,14 +440,14 @@ const TeamTimesheets = () => {
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
                   {!selectedUser && (
                     <tr>
-                      <td colSpan={9} className="px-5 py-14 text-center text-sm text-slate-400">
+                      <td colSpan={10} className="px-5 py-14 text-center text-sm text-slate-400">
                         Select an employee to view their logs
                       </td>
                     </tr>
                   )}
                   {selectedUser && loading && (
                     <tr>
-                      <td colSpan={9} className="px-5 py-14 text-center">
+                      <td colSpan={10} className="px-5 py-14 text-center">
                         <div className="flex justify-center">
                           <div className="w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
                         </div>
@@ -345,7 +456,7 @@ const TeamTimesheets = () => {
                   )}
                   {selectedUser && !loading && filteredRows.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="px-5 py-14 text-center text-sm text-slate-400">
+                      <td colSpan={10} className="px-5 py-14 text-center text-sm text-slate-400">
                         No logs found
                       </td>
                     </tr>
@@ -355,6 +466,7 @@ const TeamTimesheets = () => {
                     if (row.type === 'absent') {
                       return (
                         <tr key={`absent-${row.flag.date}`} className="bg-red-50/30 dark:bg-red-900/10">
+                          <td className="px-4 py-3.5" style={{ verticalAlign: 'middle' }} />
                           <td className="px-5 py-3.5 font-medium text-slate-800 dark:text-slate-200" style={{ verticalAlign: 'middle' }}>
                             {formatDate(row.flag.date)}
                           </td>
@@ -373,6 +485,8 @@ const TeamTimesheets = () => {
                     }
 
                     const { log, flag } = row
+                    const isSelected = selectedIds.has(log._id)
+                    const isSelectable = !!log.timeOut
                     const workedMins = log.timeOut
                       ? (new Date(log.timeOut) - new Date(log.timeIn)) / 60000 - log.totalBreakMins
                       : null
@@ -380,10 +494,24 @@ const TeamTimesheets = () => {
                     return (
                       <tr
                         key={log._id}
-                        className={`hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors ${
-                          flag ? 'bg-amber-50/30 dark:bg-amber-900/10' : ''
+                        className={`transition-colors ${
+                          isSelected
+                            ? 'bg-brand-50/40 dark:bg-brand-900/10'
+                            : flag
+                            ? 'bg-amber-50/30 dark:bg-amber-900/10 hover:bg-amber-50/50'
+                            : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'
                         }`}
                       >
+                        <td className="px-4 py-3.5" style={{ verticalAlign: 'middle' }}>
+                          {isSelectable && (
+                            <button onClick={() => toggleOne(log._id)} className="text-slate-300 hover:text-brand-500 transition-colors">
+                              {isSelected
+                                ? <CheckSquare size={15} className="text-brand-500" />
+                                : <Square size={15} />
+                              }
+                            </button>
+                          )}
+                        </td>
                         <td className="px-5 py-3.5 font-medium text-slate-800 dark:text-slate-200" style={{ verticalAlign: 'middle' }}>
                           <div className="flex items-center gap-1.5">
                             {formatDate(log.date)}
@@ -481,7 +609,7 @@ const TeamTimesheets = () => {
         </div>
       </main>
 
-      {/* Edit log modal */}
+      {/* Edit modal */}
       {editModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md p-6 shadow-card animate-slide-up">
@@ -494,35 +622,19 @@ const TeamTimesheets = () => {
                 <p className="text-xs text-slate-400 mt-0.5">{formatDate(editModal.date)} · {selectedUser?.name}</p>
               </div>
             </div>
-
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wide">
-                    Time In
-                  </label>
-                  <TimePicker
-                    value={editForm.timeIn}
-                    onChange={(val) => setEditForm({ ...editForm, timeIn: val })}
-                    className="w-full"
-                  />
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wide">Time In</label>
+                  <TimePicker value={editForm.timeIn} onChange={(val) => setEditForm({ ...editForm, timeIn: val })} className="w-full" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wide">
-                    Time Out
-                  </label>
-                  <TimePicker
-                    value={editForm.timeOut}
-                    onChange={(val) => setEditForm({ ...editForm, timeOut: val })}
-                    className="w-full"
-                  />
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wide">Time Out</label>
+                  <TimePicker value={editForm.timeOut} onChange={(val) => setEditForm({ ...editForm, timeOut: val })} className="w-full" />
                 </div>
               </div>
-
               <div>
-                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wide">
-                  Admin Note
-                </label>
+                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wide">Admin Note</label>
                 <textarea
                   value={editForm.adminNote}
                   onChange={(e) => setEditForm({ ...editForm, adminNote: e.target.value })}
@@ -532,19 +644,9 @@ const TeamTimesheets = () => {
                 />
               </div>
             </div>
-
             <div className="flex gap-2.5 mt-5">
-              <button
-                onClick={() => setEditModal(null)}
-                className="btn-secondary flex-1"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleEditSave}
-                disabled={saving}
-                className="btn-primary flex-1"
-              >
+              <button onClick={() => setEditModal(null)} className="btn-secondary flex-1">Cancel</button>
+              <button onClick={handleEditSave} disabled={saving} className="btn-primary flex-1">
                 {saving ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
@@ -552,13 +654,11 @@ const TeamTimesheets = () => {
         </div>
       )}
 
-      {/* Flag modal */}
+      {/* Single flag modal */}
       {flagModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md p-6 shadow-card animate-slide-up">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-1">
-              Flag this log
-            </h3>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-1">Flag this log</h3>
             <p className="text-xs text-slate-400 mb-4">
               {formatDate(flagModal.date)} · {formatTime(flagModal.timeIn)} — {formatTime(flagModal.timeOut)}
             </p>
@@ -570,18 +670,44 @@ const TeamTimesheets = () => {
               className="input-base resize-none mb-4 w-full"
             />
             <div className="flex gap-2.5">
-              <button
-                onClick={() => { setFlagModal(null); setAdminNote('') }}
-                className="btn-secondary flex-1"
-              >
-                Cancel
-              </button>
+              <button onClick={() => { setFlagModal(null); setAdminNote('') }} className="btn-secondary flex-1">Cancel</button>
               <button
                 onClick={handleFlag}
                 disabled={flagging || !adminNote.trim()}
                 className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-medium rounded-xl py-2.5 transition-all active:scale-95"
               >
                 {flagging ? 'Flagging...' : 'Flag Log'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk flag modal */}
+      {bulkFlagModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md p-6 shadow-card animate-slide-up">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-1">
+              Bulk Flag {cleanSelected} Log{cleanSelected > 1 ? 's' : ''}
+            </h3>
+            <p className="text-xs text-slate-400 mb-4">
+              This note will be applied to all selected clean logs.
+            </p>
+            <textarea
+              value={bulkNote}
+              onChange={(e) => setBulkNote(e.target.value)}
+              rows={3}
+              placeholder="Describe the issue..."
+              className="input-base resize-none mb-4 w-full"
+            />
+            <div className="flex gap-2.5">
+              <button onClick={() => { setBulkFlagModal(false); setBulkNote('') }} className="btn-secondary flex-1">Cancel</button>
+              <button
+                onClick={handleBulkFlag}
+                disabled={bulkFlagging || !bulkNote.trim()}
+                className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-medium rounded-xl py-2.5 transition-all active:scale-95"
+              >
+                {bulkFlagging ? 'Flagging...' : `Flag ${cleanSelected} Log${cleanSelected > 1 ? 's' : ''}`}
               </button>
             </div>
           </div>

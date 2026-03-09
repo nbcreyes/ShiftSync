@@ -14,13 +14,16 @@ const notificationSchema = new mongoose.Schema({
   type: {
     type: String,
     enum: [
-      'remark_created',      // admin flagged employee's log
-      'remark_reply',        // someone replied to a thread
-      'remark_resolved',     // admin resolved a remark
-      'invite_accepted',     // invitee accepted invite
+      'remark_created',
+      'remark_reply',
+      'remark_resolved',
+      'invite_accepted',
       'manual_log_requested',
       'manual_log_approved',
       'manual_log_rejected',
+      'leave_requested',
+      'leave_approved',
+      'leave_rejected',
     ],
     required: true,
   },
@@ -32,7 +35,6 @@ const notificationSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
-  // Optional references for deep-linking
   remarkId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Remark',
@@ -41,6 +43,11 @@ const notificationSchema = new mongoose.Schema({
   logId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'TimeLog',
+    default: null,
+  },
+  leaveId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'LeaveRequest',
     default: null,
   },
   read: {
@@ -53,7 +60,6 @@ const notificationSchema = new mongoose.Schema({
   },
 })
 
-// Index for fast unread count queries
 notificationSchema.index({ recipientId: 1, read: 1 })
 notificationSchema.index({ tenantId: 1, recipientId: 1, createdAt: -1 })
 

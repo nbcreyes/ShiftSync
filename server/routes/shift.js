@@ -6,6 +6,7 @@ const {
   deleteSchedule,
   getAllSchedules,
   getFlags,
+  getMyFlags,
 } = require('../controllers/shiftController')
 const verifyToken = require('../middleware/verifyToken')
 const requireRole = require('../middleware/requireRole')
@@ -19,7 +20,17 @@ const adminOnly = [
   mustChangePassword,
 ]
 
-// All shift routes are admin/owner only
+const employeeProtect = [
+  verifyToken,
+  requireRole('employee', 'admin', 'owner'),
+  scopeToTenant,
+  mustChangePassword,
+]
+
+// Employee
+router.get('/my-flags', ...employeeProtect, getMyFlags)
+
+// Admin/Owner
 router.get('/', ...adminOnly, getAllSchedules)
 router.get('/flags', ...adminOnly, getFlags)
 router.get('/:userId', ...adminOnly, getSchedule)

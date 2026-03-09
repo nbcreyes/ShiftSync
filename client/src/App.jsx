@@ -12,12 +12,16 @@ import ChangePassword from "./pages/auth/ChangePassword";
 import Dashboard from "./pages/dashboard/Dashboard";
 import History from "./pages/dashboard/History";
 import Profile from "./pages/dashboard/Profile";
+import Flags from "./pages/dashboard/Flags";
+import Leave from "./pages/dashboard/Leave";
 
 import AdminPanel from "./pages/admin/AdminPanel";
 import TeamTimesheets from "./pages/admin/TeamTimesheets";
 import InviteManagement from "./pages/admin/InviteManagement";
 import MemberManagement from "./pages/admin/MemberManagement";
 import Reports from "./pages/admin/Reports";
+import LeaveManagement from "./pages/admin/LeaveManagement";
+import AuditLog from "./pages/admin/AuditLog";
 
 import SuperuserDashboard from "./pages/superuser/SuperuserDashboard";
 import WorkspaceDetail from "./pages/superuser/WorkspaceDetail";
@@ -83,6 +87,22 @@ const App = () => {
           }
         />
         <Route
+          path="/dashboard/flags"
+          element={
+            <ProtectedRoute allowedRoles={["employee", "admin", "owner"]}>
+              <Flags />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/dashboard/leave"
+          element={
+            <ProtectedRoute allowedRoles={["employee", "admin", "owner"]}>
+              <Leave />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/profile"
           element={
             <ProtectedRoute allowedRoles={["employee", "admin", "owner"]}>
@@ -128,6 +148,22 @@ const App = () => {
           element={
             <ProtectedRoute allowedRoles={["admin", "owner"]}>
               <Reports />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/leave"
+          element={
+            <ProtectedRoute allowedRoles={["admin", "owner"]}>
+              <LeaveManagement />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/audit"
+          element={
+            <ProtectedRoute allowedRoles={["admin", "owner"]}>
+              <AuditLog />
             </ProtectedRoute>
           }
         />
