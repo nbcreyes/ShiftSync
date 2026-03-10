@@ -13,6 +13,9 @@ const {
   getSummaryReport,
   getDepartmentReport,
   adminEditLog,
+  getPendingCounts,
+  getMemberDetail,
+  getFlagTrends,
 } = require('../controllers/adminController')
 const verifyToken = require('../middleware/verifyToken')
 const requireRole = require('../middleware/requireRole')
@@ -41,7 +44,10 @@ router.get('/export/csv', ...adminProtect, exportCSV)
 router.get('/workspace', ...adminProtect, getWorkspace)
 router.get('/reports/summary', ...adminProtect, getSummaryReport)
 router.get('/reports/department', ...adminProtect, getDepartmentReport)
+router.get('/pending-counts', ...adminProtect, getPendingCounts)
+router.get('/members/:id', ...adminProtect, getMemberDetail)
 router.patch('/timelog/:logId/edit', ...adminProtect, adminEditLog)
+router.get('/reports/flags', ...adminProtect, getFlagTrends)
 
 // Owner only
 router.patch('/users/:id/role', ...ownerOnly, updateRole)

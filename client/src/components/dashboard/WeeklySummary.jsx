@@ -1,7 +1,11 @@
+import { toZonedTime, format } from 'date-fns-tz'
+import useSessionStore from '../../store/sessionStore'
+
 const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-const getWeekDates = () => {
-  const now = new Date()
+const getWeekDates = (timezone) => {
+  const tz = timezone || 'UTC'
+  const now = toZonedTime(new Date(), tz)
   const day = now.getDay()
   const diff = day === 0 ? 6 : day - 1
   const monday = new Date(now)
@@ -9,12 +13,15 @@ const getWeekDates = () => {
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday)
     d.setDate(monday.getDate() + i)
-    return d.toISOString().split('T')[0]
+    return format(d, 'yyyy-MM-dd')
   })
 }
 
 const WeeklySummary = ({ logs }) => {
-  const weekDates = getWeekDates()
+  const { timezone } = useSessionStore()
+  const tz = timezone || 'UTC'
+
+  const weekDates = getWeekDates(tz)
   const byDate = {}
   logs.forEach((log) => { byDate[log.date] = log })
 
@@ -24,7 +31,7 @@ const WeeklySummary = ({ logs }) => {
   }, 0)
 
   const overtimeDays = logs.filter((l) => l.overtime).length
-  const today = new Date().toISOString().split('T')[0]
+  const today = format(toZonedTime(new Date(), tz), 'yyyy-MM-dd', { timeZone: tz })
 
   return (
     <div className="card shadow-soft p-6 flex flex-col gap-6">

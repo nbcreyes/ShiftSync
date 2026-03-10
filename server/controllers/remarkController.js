@@ -4,7 +4,6 @@ const Notification = require('../models/Notification')
 const User = require('../models/User')
 const { sendRemarkCreatedEmail, sendRemarkReplyEmail, sendRemarkResolvedEmail } = require('../utils/email')
 
-// ─── Helper: create a notification silently (never throws) ───────────────────
 const notify = async (data) => {
   try {
     await Notification.create(data)
@@ -13,7 +12,7 @@ const notify = async (data) => {
   }
 }
 
-// ─── Create Remark (admin/owner flags a log) ──────────────────────────────────
+// ─── Create Remark ────────────────────────────────────────────────────────────
 const createRemark = async (req, res) => {
   try {
     const { adminNote } = req.body
@@ -23,15 +22,8 @@ const createRemark = async (req, res) => {
       return res.status(400).json({ message: 'Admin note is required' })
     }
 
-    const log = await TimeLog.findOne({
-      _id: logId,
-      tenantId: req.tenantId,
-    })
-
-    if (!log) {
-      return res.status(404).json({ message: 'Time log not found' })
-    }
-
+    const log = await TimeLog.findOne({ _id: logId, tenantId: req.tenantId })
+    if (!log) return res.status(404).json({ message: 'Time log not found' })
     if (log.status === 'remarked') {
       return res.status(409).json({ message: 'This log has already been remarked' })
     }
@@ -41,19 +33,12 @@ const createRemark = async (req, res) => {
       logId,
       adminId: req.user._id,
       adminNote,
-      thread: [
-        {
-          authorId: req.user._id,
-          role: req.user.role,
-          message: adminNote,
-        },
-      ],
+      thread: [{ authorId: req.user._id, role: req.user.role, message: adminNote }],
     })
 
     log.status = 'remarked'
     await log.save()
 
-    // ── Notify employee ──
     const employee = await User.findById(log.userId)
     if (employee) {
       await notify({
@@ -66,15 +51,17 @@ const createRemark = async (req, res) => {
         logId: log._id,
       })
 
-      // ── Email employee ──
       try {
-        await sendRemarkCreatedEmail({
-          toEmail: employee.email,
-          toName: employee.name,
-          adminName: req.user.name,
-          logDate: log.date,
-          adminNote,
-        })
+        const recipientFull = await User.findById(employee._id).select('notificationPrefs')
+        if (recipientFull?.notificationPrefs?.emailOnRemarkCreated !== false) {
+          await sendRemarkCreatedEmail({
+            toEmail: employee.email,
+            toName: employee.name,
+            adminName: req.user.name,
+            logDate: log.date,
+            adminNote,
+          })
+        }
       } catch (emailErr) {
         console.error('[email] sendRemarkCreatedEmail failed:', emailErr.message)
       }
@@ -87,56 +74,30 @@ const createRemark = async (req, res) => {
   }
 }
 
-// ─── Reply to Thread (admin or employee) ─────────────────────────────────────
+// ─── Reply to Thread ──────────────────────────────────────────────────────────
 const replyToRemark = async (req, res) => {
   try {
     const { message } = req.body
     const { remarkId } = req.params
 
-    if (!message) {
-      return res.status(400).json({ message: 'Message is required' })
-    }
+    if (!message) return res.status(400).json({ message: 'Message is required' })
 
-    const remark = await Remark.findOne({
-      _id: remarkId,
-      tenantId: req.tenantId,
-    })
-
-    if (!remark) {
-      return res.status(404).json({ message: 'Remark not found' })
-    }
-
+    const remark = await Remark.findOne({ _id: remarkId, tenantId: req.tenantId })
+    if (!remark) return res.status(404).json({ message: 'Remark not found' })
     if (remark.status === 'resolved') {
       return res.status(400).json({ message: 'Cannot reply to a resolved remark' })
     }
 
-    // Employee can only reply to remarks on their own logs
     if (req.user.role === 'employee') {
-      const log = await TimeLog.findOne({
-        _id: remark.logId,
-        userId: req.user._id,
-        tenantId: req.tenantId,
-      })
-
-      if (!log) {
-        return res.status(403).json({ message: 'You can only reply to remarks on your own logs' })
-      }
+      const log = await TimeLog.findOne({ _id: remark.logId, userId: req.user._id, tenantId: req.tenantId })
+      if (!log) return res.status(403).json({ message: 'You can only reply to remarks on your own logs' })
     }
 
-    remark.thread.push({
-      authorId: req.user._id,
-      role: req.user.role,
-      message,
-    })
-
+    remark.thread.push({ authorId: req.user._id, role: req.user.role, message })
     await remark.save()
 
-    // ── Notify the other party ──
     const log = await TimeLog.findById(remark.logId)
     const isEmployee = req.user.role === 'employee'
-
-    // If employee replied → notify the admin who created the remark
-    // If admin replied → notify the employee who owns the log
     const recipientId = isEmployee ? remark.adminId : log?.userId
 
     if (recipientId && recipientId.toString() !== req.user._id.toString()) {
@@ -152,15 +113,17 @@ const replyToRemark = async (req, res) => {
           logId: remark.logId,
         })
 
-        // ── Email recipient ──
         try {
-          await sendRemarkReplyEmail({
-            toEmail: recipient.email,
-            toName: recipient.name,
-            replierName: req.user.name,
-            message,
-            logDate: log?.date,
-          })
+          const recipientFull = await User.findById(recipient._id).select('notificationPrefs')
+          if (recipientFull?.notificationPrefs?.emailOnRemarkReply !== false) {
+            await sendRemarkReplyEmail({
+              toEmail: recipient.email,
+              toName: recipient.name,
+              replierName: req.user.name,
+              message,
+              logDate: log?.date,
+            })
+          }
         } catch (emailErr) {
           console.error('[email] sendRemarkReplyEmail failed:', emailErr.message)
         }
@@ -174,20 +137,13 @@ const replyToRemark = async (req, res) => {
   }
 }
 
-// ─── Resolve Remark (admin/owner only) ───────────────────────────────────────
+// ─── Resolve Remark ───────────────────────────────────────────────────────────
 const resolveRemark = async (req, res) => {
   try {
     const { remarkId } = req.params
 
-    const remark = await Remark.findOne({
-      _id: remarkId,
-      tenantId: req.tenantId,
-    })
-
-    if (!remark) {
-      return res.status(404).json({ message: 'Remark not found' })
-    }
-
+    const remark = await Remark.findOne({ _id: remarkId, tenantId: req.tenantId })
+    if (!remark) return res.status(404).json({ message: 'Remark not found' })
     if (remark.status === 'resolved') {
       return res.status(400).json({ message: 'Remark is already resolved' })
     }
@@ -201,7 +157,6 @@ const resolveRemark = async (req, res) => {
       log.status = 'resolved'
       await log.save()
 
-      // ── Notify employee ──
       const employee = await User.findById(log.userId)
       if (employee) {
         await notify({
@@ -214,14 +169,16 @@ const resolveRemark = async (req, res) => {
           logId: log._id,
         })
 
-        // ── Email employee ──
         try {
-          await sendRemarkResolvedEmail({
-            toEmail: employee.email,
-            toName: employee.name,
-            adminName: req.user.name,
-            logDate: log.date,
-          })
+          const recipientFull = await User.findById(employee._id).select('notificationPrefs')
+          if (recipientFull?.notificationPrefs?.emailOnRemarkResolved !== false) {
+            await sendRemarkResolvedEmail({
+              toEmail: employee.email,
+              toName: employee.name,
+              adminName: req.user.name,
+              logDate: log.date,
+            })
+          }
         } catch (emailErr) {
           console.error('[email] sendRemarkResolvedEmail failed:', emailErr.message)
         }
@@ -235,7 +192,7 @@ const resolveRemark = async (req, res) => {
   }
 }
 
-// ─── Get My Remarks (employee sees their own open remarks) ────────────────────
+// ─── Get My Remarks ───────────────────────────────────────────────────────────
 const getMyRemarks = async (req, res) => {
   try {
     const logs = await TimeLog.find({
@@ -246,10 +203,7 @@ const getMyRemarks = async (req, res) => {
 
     const logIds = logs.map((l) => l._id)
 
-    const remarks = await Remark.find({
-      tenantId: req.tenantId,
-      logId: { $in: logIds },
-    })
+    const remarks = await Remark.find({ tenantId: req.tenantId, logId: { $in: logIds } })
       .populate('adminId', 'name email')
       .populate('logId', 'date timeIn timeOut')
       .populate('thread.authorId', 'name role')
@@ -262,11 +216,10 @@ const getMyRemarks = async (req, res) => {
   }
 }
 
-// ─── Get All Remarks (admin/owner sees all open remarks in workspace) ─────────
+// ─── Get All Remarks ──────────────────────────────────────────────────────────
 const getAllRemarks = async (req, res) => {
   try {
     const { status } = req.query
-
     const query = { tenantId: req.tenantId }
     if (status) query.status = status
 
@@ -286,18 +239,12 @@ const getAllRemarks = async (req, res) => {
 // ─── Get Single Remark ────────────────────────────────────────────────────────
 const getRemarkById = async (req, res) => {
   try {
-    const remark = await Remark.findOne({
-      _id: req.params.remarkId,
-      tenantId: req.tenantId,
-    })
+    const remark = await Remark.findOne({ _id: req.params.remarkId, tenantId: req.tenantId })
       .populate('adminId', 'name email')
       .populate('logId', 'date timeIn timeOut userId employeeNote')
       .populate('thread.authorId', 'name role')
 
-    if (!remark) {
-      return res.status(404).json({ message: 'Remark not found' })
-    }
-
+    if (!remark) return res.status(404).json({ message: 'Remark not found' })
     return res.status(200).json(remark)
   } catch (error) {
     console.error('GetRemarkById error:', error.message)

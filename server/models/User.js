@@ -1,16 +1,12 @@
-const mongoose = require('mongoose')
+const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
   tenantId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Tenant',
+    ref: "Tenant",
     default: null,
   },
-  name: {
-    type: String,
-    required: true,
-    trim: true,
-  },
+  name: { type: String, required: true, trim: true },
   email: {
     type: String,
     required: true,
@@ -18,40 +14,28 @@ const userSchema = new mongoose.Schema({
     lowercase: true,
     trim: true,
   },
-  passwordHash: {
-    type: String,
-    default: null,
-  },
+  passwordHash: { type: String, default: null },
   role: {
     type: String,
-    enum: ['superuser', 'owner', 'admin', 'employee'],
+    enum: ["superuser", "owner", "admin", "employee"],
     required: true,
   },
-  department: {
-    type: String,
-    trim: true,
-    default: null,
+  department: { type: String, trim: true, default: null },
+  avatarUrl: { type: String, default: null },
+  isActive: { type: Boolean, default: true },
+  mustChangePassword: { type: Boolean, default: false },
+  refreshToken: { type: String, default: null },
+  resetPasswordToken: { type: String, default: null },
+  resetPasswordExpires: { type: Date, default: null },
+  notificationPrefs: {
+    emailOnLeaveReviewed: { type: Boolean, default: true },
+    emailOnRemarkCreated: { type: Boolean, default: true },
+    emailOnRemarkReply: { type: Boolean, default: true },
+    emailOnRemarkResolved: { type: Boolean, default: true },
+    emailOnManualLogReview: { type: Boolean, default: true },
+    emailOnOvertime: { type: Boolean, default: true },
   },
-  avatarUrl: {
-    type: String,
-    default: null,
-  },
-  isActive: {
-    type: Boolean,
-    default: true,
-  },
-  mustChangePassword: {
-    type: Boolean,
-    default: false,
-  },
-  refreshToken: {
-    type: String,
-    default: null,
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-})
+  createdAt: { type: Date, default: Date.now },
+});
 
-module.exports = mongoose.model('User', userSchema)
+module.exports = mongoose.model("User", userSchema);

@@ -1,4 +1,5 @@
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate } from "react-router-dom";
+import { useEffect } from "react";
 import {
   Clock,
   LayoutDashboard,
@@ -13,70 +14,113 @@ import {
   AlertTriangle,
   Umbrella,
   Shield,
-} from 'lucide-react'
-import useAuthStore from '../../store/authStore'
-import { logout } from '../../api/auth'
-import toast from 'react-hot-toast'
+  Megaphone,
+} from "lucide-react";
+import useAuthStore from "../../store/authStore";
+import usePendingStore from "../../store/pendingStore";
+import { logout } from "../../api/auth";
+import toast from "react-hot-toast";
+
+// ─── Badge ─────────────────────────────────────────────────────────────────────
+const Badge = ({ count }) => {
+  if (!count || count < 1) return null;
+  return (
+    <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+};
 
 const Sidebar = () => {
-  const { user, clearAuth } = useAuthStore()
-  const navigate = useNavigate()
+  const { user, clearAuth } = useAuthStore();
+  const { pendingLeave, pendingManualLogs, fetchPendingCounts, clearPending } =
+    usePendingStore();
+  const navigate = useNavigate();
+
+  const isAdminOrOwner = user?.role === "admin" || user?.role === "owner";
+
+  // Poll every 60 seconds for admins/owners
+  useEffect(() => {
+    if (!isAdminOrOwner) return;
+    fetchPendingCounts();
+    const interval = setInterval(fetchPendingCounts, 60_000);
+    return () => clearInterval(interval);
+  }, [isAdminOrOwner]);
 
   const handleLogout = async () => {
-    try { await logout() } catch { /* proceed */ } finally {
-      clearAuth()
-      navigate('/login')
-      toast.success('Logged out')
+    try {
+      await logout();
+    } catch {
+      /* proceed */
+    } finally {
+      clearAuth();
+      clearPending();
+      navigate("/login");
+      toast.success("Logged out");
     }
-  }
+  };
 
   const employeeLinks = [
-    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/dashboard/history', label: 'History', icon: History },
-    { to: '/dashboard/flags', label: 'My Flags', icon: AlertTriangle },
-    { to: '/dashboard/leave', label: 'Leave', icon: Umbrella },
-    { to: '/profile', label: 'Profile', icon: UserCircle },
-  ]
+    { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { to: "/dashboard/history", label: "History", icon: History },
+    { to: "/dashboard/flags", label: "My Flags", icon: AlertTriangle },
+    { to: "/dashboard/leave", label: "Leave", icon: Umbrella },
+    { to: "/profile", label: "Profile", icon: UserCircle },
+  ];
 
   const adminLinks = [
-    { to: '/admin', label: 'Overview', icon: LayoutDashboard },
-    { to: '/admin/timesheets', label: 'Timesheets', icon: CalendarDays },
-    { to: '/admin/invites', label: 'Invites', icon: UserPlus },
-    { to: '/admin/reports', label: 'Reports', icon: BarChart3 },
-    { to: '/admin/leave', label: 'Leave', icon: Umbrella },
-    { to: '/admin/audit', label: 'Audit Log', icon: Shield },
-    { to: '/dashboard/flags', label: 'My Flags', icon: AlertTriangle },
-    { to: '/profile', label: 'Profile', icon: UserCircle },
-  ]
+    { to: "/admin", label: "Overview", icon: LayoutDashboard },
+    {
+      to: "/admin/timesheets",
+      label: "Timesheets",
+      icon: CalendarDays,
+      badge: pendingManualLogs,
+    },
+    { to: "/admin/invites", label: "Invites", icon: UserPlus },
+    { to: "/admin/reports", label: "Reports", icon: BarChart3 },
+    { to: "/admin/leave", label: "Leave", icon: Umbrella, badge: pendingLeave },
+    { to: "/admin/audit", label: "Audit Log", icon: Shield },
+    { to: "/dashboard/flags", label: "My Flags", icon: AlertTriangle },
+    { to: "/profile", label: "Profile", icon: UserCircle },
+  ];
 
   const ownerLinks = [
-    { to: '/admin', label: 'Overview', icon: LayoutDashboard },
-    { to: '/admin/timesheets', label: 'Timesheets', icon: CalendarDays },
-    { to: '/admin/invites', label: 'Invites', icon: UserPlus },
-    { to: '/admin/reports', label: 'Reports', icon: BarChart3 },
-    { to: '/admin/members', label: 'Members', icon: Users },
-    { to: '/admin/leave', label: 'Leave', icon: Umbrella },
-    { to: '/admin/audit', label: 'Audit Log', icon: Shield },
-    { to: '/dashboard/flags', label: 'My Flags', icon: AlertTriangle },
-    { to: '/profile', label: 'Profile', icon: UserCircle },
-  ]
+    { to: "/admin", label: "Overview", icon: LayoutDashboard },
+    {
+      to: "/admin/timesheets",
+      label: "Timesheets",
+      icon: CalendarDays,
+      badge: pendingManualLogs,
+    },
+    { to: "/admin/invites", label: "Invites", icon: UserPlus },
+    { to: "/admin/reports", label: "Reports", icon: BarChart3 },
+    { to: "/admin/members", label: "Members", icon: Users },
+    { to: "/admin/leave", label: "Leave", icon: Umbrella, badge: pendingLeave },
+    { to: "/admin/announcements", label: "Announcements", icon: Megaphone },
+    { to: "/admin/audit", label: "Audit Log", icon: Shield },
+    { to: "/dashboard/flags", label: "My Flags", icon: AlertTriangle },
+    { to: "/profile", label: "Profile", icon: UserCircle },
+  ];
 
   const superuserLinks = [
-    { to: '/superuser', label: 'Platform', icon: ShieldCheck },
-  ]
+    { to: "/superuser", label: "Platform", icon: ShieldCheck },
+  ];
 
   const links =
-    user?.role === 'superuser' ? superuserLinks
-    : user?.role === 'owner' ? ownerLinks
-    : user?.role === 'admin' ? adminLinks
-    : employeeLinks
+    user?.role === "superuser"
+      ? superuserLinks
+      : user?.role === "owner"
+        ? ownerLinks
+        : user?.role === "admin"
+          ? adminLinks
+          : employeeLinks;
 
   const navLink = ({ isActive }) =>
     `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
       isActive
-        ? 'bg-brand-500 text-white shadow-glow'
-        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-slate-100'
-    }`
+        ? "bg-brand-500 text-white shadow-glow"
+        : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-slate-100"
+    }`;
 
   return (
     <aside className="w-64 h-screen sticky top-0 flex flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700/60">
@@ -92,10 +136,11 @@ const Sidebar = () => {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {links.map(({ to, label, icon: Icon }) => (
+        {links.map(({ to, label, icon: Icon, badge }) => (
           <NavLink key={to} to={to} className={navLink} end>
             <Icon size={16} />
-            {label}
+            <span className="flex-1">{label}</span>
+            <Badge count={badge} />
           </NavLink>
         ))}
       </nav>
@@ -121,7 +166,7 @@ const Sidebar = () => {
         </button>
       </div>
     </aside>
-  )
-}
+  );
+};
 
-export default Sidebar
+export default Sidebar;

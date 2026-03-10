@@ -2,11 +2,14 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell,
 } from 'recharts'
+import { toZonedTime, format } from 'date-fns-tz'
+import useSessionStore from '../../store/sessionStore'
 
 const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-const getWeekDates = () => {
-  const now = new Date()
+const getWeekDates = (timezone) => {
+  const tz = timezone || 'UTC'
+  const now = toZonedTime(new Date(), tz)
   const day = now.getDay()
   const diff = day === 0 ? 6 : day - 1
   const monday = new Date(now)
@@ -14,7 +17,7 @@ const getWeekDates = () => {
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday)
     d.setDate(monday.getDate() + i)
-    return d.toISOString().split('T')[0]
+    return format(d, 'yyyy-MM-dd')
   })
 }
 
@@ -29,7 +32,8 @@ const CustomTooltip = ({ active, payload, label }) => {
 }
 
 const WeeklyChart = ({ logs }) => {
-  const weekDates = getWeekDates()
+  const { timezone } = useSessionStore()
+  const weekDates = getWeekDates(timezone)
   const byDate = {}
   logs.forEach((log) => { byDate[log.date] = log })
 

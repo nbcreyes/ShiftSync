@@ -24,6 +24,7 @@ const notificationSchema = new mongoose.Schema({
       'leave_requested',
       'leave_approved',
       'leave_rejected',
+      'overtime_alert',
     ],
     required: true,
   },

@@ -24,3 +24,4 @@ export const getDepartmentReport = (params) =>
   api.get('/api/admin/reports/department', { params: { ...params, timezone: tz() } })
 export const adminEditLog = (logId, data) =>
   api.patch(`/api/admin/timelog/${logId}/edit`, data)
+export const getMemberDetail = (id) => api.get(`/api/admin/members/${id}`)

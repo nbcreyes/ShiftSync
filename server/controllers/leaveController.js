@@ -3,14 +3,19 @@ const User = require('../models/User')
 const Notification = require('../models/Notification')
 const { createAuditLog } = require('./auditController')
 const { sendLeaveRequestEmail, sendLeaveReviewedEmail } = require('../utils/email')
+const { getOrCreate } = require('./leaveBalanceController')
 
-// ─── Create Notification (silent) ────────────────────────────────────────────
 const createNotification = async (data) => {
   try {
     await Notification.create(data)
   } catch (err) {
     console.error('[notification] failed to create:', err.message)
   }
+}
+
+const countDays = (startDate, endDate) => {
+  const diff = new Date(endDate + 'T12:00:00') - new Date(startDate + 'T12:00:00')
+  return Math.round(diff / (1000 * 60 * 60 * 24)) + 1
 }
 
 // ─── Submit Leave Request ─────────────────────────────────────────────────────
@@ -24,6 +29,20 @@ const submitLeave = async (req, res) => {
 
     if (endDate < startDate) {
       return res.status(400).json({ message: 'endDate must be on or after startDate' })
+    }
+
+    if (!['unpaid', 'other'].includes(type)) {
+      const year = new Date(startDate + 'T12:00:00').getFullYear()
+      const balance = await getOrCreate(req.tenantId, req.user._id, year)
+      const { allowed, used } = balance.balances[type]
+      const remaining = allowed - used
+      const requested = countDays(startDate, endDate)
+
+      if (allowed > 0 && requested > remaining) {
+        return res.status(400).json({
+          message: `Insufficient ${type} leave balance. You have ${remaining} day${remaining !== 1 ? 's' : ''} remaining.`,
+        })
+      }
     }
 
     const leave = await LeaveRequest.create({
@@ -51,7 +70,6 @@ const submitLeave = async (req, res) => {
           message: `${req.user.name} submitted a ${type} leave request from ${startDate} to ${endDate}.`,
           leaveId: leave._id,
         })
-
         try {
           await sendLeaveRequestEmail({
             toEmail: admin.email,
@@ -109,7 +127,6 @@ const cancelLeave = async (req, res) => {
     }
 
     await leave.deleteOne()
-
     return res.status(200).json({ message: 'Leave request cancelled' })
   } catch (error) {
     console.error('CancelLeave error:', error.message)
@@ -164,6 +181,20 @@ const reviewLeave = async (req, res) => {
     leave.reviewedAt = new Date()
     await leave.save()
 
+    // ── Deduct balance on approval ────────────────────────────────────────────
+    if (status === 'approved' && !['unpaid', 'other'].includes(leave.type)) {
+      try {
+        const year = new Date(leave.startDate + 'T12:00:00').getFullYear()
+        const days = countDays(leave.startDate, leave.endDate)
+        const balance = await getOrCreate(req.tenantId, leave.userId._id, year)
+        balance.balances[leave.type].used = balance.balances[leave.type].used + days
+        balance.updatedAt = new Date()
+        await balance.save()
+      } catch (err) {
+        console.error('[leaveBalance] deduct failed:', err.message)
+      }
+    }
+
     await createNotification({
       tenantId: req.tenantId,
       recipientId: leave.userId._id,
@@ -180,21 +211,25 @@ const reviewLeave = async (req, res) => {
       targetType: 'leave',
       targetId: leave._id,
       targetUser: leave.userId._id,
-      description: `${status === 'approved' ? 'Approved' : 'Rejected'} ${leave.type} leave request for ${leave.userId.name} (${leave.startDate} to ${leave.endDate})`,
+      description: `${status === 'approved' ? 'Approved' : 'Rejected'} ${leave.type} leave for ${leave.userId.name} (${leave.startDate} to ${leave.endDate})`,
       meta: { leaveType: leave.type, startDate: leave.startDate, endDate: leave.endDate, adminNote },
     })
 
+    // ── Email recipient gated on prefs ────────────────────────────────────────
     try {
-      await sendLeaveReviewedEmail({
-        toEmail: leave.userId.email,
-        toName: leave.userId.name,
-        adminName: req.user.name,
-        leaveType: leave.type,
-        startDate: leave.startDate,
-        endDate: leave.endDate,
-        status,
-        adminNote: adminNote?.trim() || null,
-      })
+      const recipient = await User.findById(leave.userId._id).select('notificationPrefs')
+      if (recipient?.notificationPrefs?.emailOnLeaveReviewed !== false) {
+        await sendLeaveReviewedEmail({
+          toEmail: leave.userId.email,
+          toName: leave.userId.name,
+          adminName: req.user.name,
+          leaveType: leave.type,
+          startDate: leave.startDate,
+          endDate: leave.endDate,
+          status,
+          adminNote: adminNote?.trim() || null,
+        })
+      }
     } catch (err) {
       console.error('[email] leave reviewed notification failed:', err.message)
     }
@@ -206,10 +241,4 @@ const reviewLeave = async (req, res) => {
   }
 }
 
-module.exports = {
-  submitLeave,
-  getMyLeaves,
-  cancelLeave,
-  getAllLeaves,
-  reviewLeave,
-}
+module.exports = { submitLeave, getMyLeaves, cancelLeave, getAllLeaves, reviewLeave }

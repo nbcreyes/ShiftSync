@@ -1,27 +1,30 @@
-const Brevo = require('@getbrevo/brevo')
+const Brevo = require("@getbrevo/brevo");
 
-const client = new Brevo.TransactionalEmailsApi()
-client.setApiKey(Brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY)
+const client = new Brevo.TransactionalEmailsApi();
+client.setApiKey(
+  Brevo.TransactionalEmailsApiApiKeys.apiKey,
+  process.env.BREVO_API_KEY,
+);
 
 const sendEmail = async ({ to, toName, subject, html }) => {
-  const email = new Brevo.SendSmtpEmail()
+  const email = new Brevo.SendSmtpEmail();
 
   email.sender = {
     email: process.env.EMAIL_FROM,
-    name: 'ShiftSync',
-  }
-  email.to = [{ email: to, name: toName }]
-  email.subject = subject
-  email.htmlContent = html
+    name: "ShiftSync",
+  };
+  email.to = [{ email: to, name: toName }];
+  email.subject = subject;
+  email.htmlContent = html;
 
   try {
-    const result = await client.sendTransacEmail(email)
-    console.log('[email] sent successfully:', result)
+    const result = await client.sendTransacEmail(email);
+    console.log("[email] sent successfully:", result);
   } catch (err) {
-    console.error('[email] full error:', JSON.stringify(err, null, 2))
-    throw err
+    console.error("[email] full error:", JSON.stringify(err, null, 2));
+    throw err;
   }
-}
+};
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 const emailWrapper = (content) => `
@@ -36,23 +39,39 @@ const emailWrapper = (content) => `
       You're receiving this because you're a member of a ShiftSync workspace.
     </p>
   </div>
-`
+`;
 
 const formatLogDate = (date) =>
   date
-    ? new Date(date).toLocaleDateString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })
-    : 'your log'
+    ? new Date(date).toLocaleDateString([], {
+        weekday: "short",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })
+    : "your log";
 
 const formatLeaveDate = (dateStr) => {
-  if (!dateStr) return ''
-  const d = new Date(dateStr + 'T12:00:00')
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-}
+  if (!dateStr) return "";
+  const d = new Date(dateStr + "T12:00:00");
+  return d.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
 
-const capitalize = (str) => str.charAt(0).toUpperCase() + str.slice(1)
+const capitalize = (str) => str.charAt(0).toUpperCase() + str.slice(1);
 
 // ─── Invite Email ─────────────────────────────────────────────────────────────
-const sendInviteEmail = async ({ toEmail, toName, workspaceName, inviteLink, tempPassword }) => {
+const sendInviteEmail = async ({
+  toEmail,
+  toName,
+  workspaceName,
+  inviteLink,
+  tempPassword,
+}) => {
   await sendEmail({
     to: toEmail,
     toName,
@@ -74,11 +93,17 @@ const sendInviteEmail = async ({ toEmail, toName, workspaceName, inviteLink, tem
       </a>
       <p style="color: #94a3b8; font-size: 13px;">This invite link expires in 24 hours. If you did not expect this email, you can ignore it.</p>
     `),
-  })
-}
+  });
+};
 
 // ─── Remark Created Email ─────────────────────────────────────────────────────
-const sendRemarkCreatedEmail = async ({ toEmail, toName, adminName, logDate, adminNote }) => {
+const sendRemarkCreatedEmail = async ({
+  toEmail,
+  toName,
+  adminName,
+  logDate,
+  adminNote,
+}) => {
   await sendEmail({
     to: toEmail,
     toName,
@@ -93,11 +118,17 @@ const sendRemarkCreatedEmail = async ({ toEmail, toName, adminName, logDate, adm
       </div>
       <p>Log in to ShiftSync to view the full thread and respond.</p>
     `),
-  })
-}
+  });
+};
 
 // ─── Remark Reply Email ───────────────────────────────────────────────────────
-const sendRemarkReplyEmail = async ({ toEmail, toName, replierName, message, logDate }) => {
+const sendRemarkReplyEmail = async ({
+  toEmail,
+  toName,
+  replierName,
+  message,
+  logDate,
+}) => {
   await sendEmail({
     to: toEmail,
     toName,
@@ -112,11 +143,16 @@ const sendRemarkReplyEmail = async ({ toEmail, toName, replierName, message, log
       </div>
       <p>Log in to ShiftSync to continue the conversation.</p>
     `),
-  })
-}
+  });
+};
 
 // ─── Remark Resolved Email ────────────────────────────────────────────────────
-const sendRemarkResolvedEmail = async ({ toEmail, toName, adminName, logDate }) => {
+const sendRemarkResolvedEmail = async ({
+  toEmail,
+  toName,
+  adminName,
+  logDate,
+}) => {
   await sendEmail({
     to: toEmail,
     toName,
@@ -127,11 +163,19 @@ const sendRemarkResolvedEmail = async ({ toEmail, toName, adminName, logDate }) 
       <p><strong>${adminName}</strong> resolved the remark on your log for <strong>${formatLogDate(logDate)}</strong>.</p>
       <p>No further action is needed. Your log status has been updated to <strong>resolved</strong>.</p>
     `),
-  })
-}
+  });
+};
 
 // ─── Leave Request Email ──────────────────────────────────────────────────────
-const sendLeaveRequestEmail = async ({ toEmail, toName, employeeName, leaveType, startDate, endDate, reason }) => {
+const sendLeaveRequestEmail = async ({
+  toEmail,
+  toName,
+  employeeName,
+  leaveType,
+  startDate,
+  endDate,
+  reason,
+}) => {
   await sendEmail({
     to: toEmail,
     toName,
@@ -154,23 +198,36 @@ const sendLeaveRequestEmail = async ({ toEmail, toName, employeeName, leaveType,
             <td style="padding: 6px 0; color: #64748b; font-size: 13px;">To</td>
             <td style="padding: 6px 0; font-weight: 600;">${formatLeaveDate(endDate)}</td>
           </tr>
-          ${reason ? `
+          ${
+            reason
+              ? `
           <tr>
             <td style="padding: 6px 0; color: #64748b; font-size: 13px; vertical-align: top;">Reason</td>
             <td style="padding: 6px 0;">${reason}</td>
-          </tr>` : ''}
+          </tr>`
+              : ""
+          }
         </table>
       </div>
       <p>Log in to ShiftSync to approve or reject this request.</p>
     `),
-  })
-}
+  });
+};
 
 // ─── Leave Reviewed Email ─────────────────────────────────────────────────────
-const sendLeaveReviewedEmail = async ({ toEmail, toName, adminName, leaveType, startDate, endDate, status, adminNote }) => {
-  const isApproved = status === 'approved'
-  const statusColor = isApproved ? '#22c55e' : '#ef4444'
-  const statusLabel = isApproved ? 'Approved ✓' : 'Rejected'
+const sendLeaveReviewedEmail = async ({
+  toEmail,
+  toName,
+  adminName,
+  leaveType,
+  startDate,
+  endDate,
+  status,
+  adminNote,
+}) => {
+  const isApproved = status === "approved";
+  const statusColor = isApproved ? "#22c55e" : "#ef4444";
+  const statusLabel = isApproved ? "Approved ✓" : "Rejected";
 
   await sendEmail({
     to: toEmail,
@@ -198,31 +255,46 @@ const sendLeaveReviewedEmail = async ({ toEmail, toName, adminName, leaveType, s
             <td style="padding: 6px 0; color: #64748b; font-size: 13px;">Status</td>
             <td style="padding: 6px 0; font-weight: 600; color: ${statusColor};">${statusLabel}</td>
           </tr>
-          ${adminNote ? `
+          ${
+            adminNote
+              ? `
           <tr>
             <td style="padding: 6px 0; color: #64748b; font-size: 13px; vertical-align: top;">Note</td>
             <td style="padding: 6px 0;">${adminNote}</td>
-          </tr>` : ''}
+          </tr>`
+              : ""
+          }
         </table>
       </div>
-      ${isApproved
-        ? '<p>Your leave has been approved. Enjoy your time off!</p>'
-        : '<p>If you have questions, please reach out to your admin.</p>'
+      ${
+        isApproved
+          ? "<p>Your leave has been approved. Enjoy your time off!</p>"
+          : "<p>If you have questions, please reach out to your admin.</p>"
       }
     `),
-  })
-}
+  });
+};
 
 // ─── Digest Email ─────────────────────────────────────────────────────────────
-const sendDigestEmail = async ({ toEmail, toName, companyName, digestType, dateLabel, stats, employeeRows }) => {
+const sendDigestEmail = async ({
+  toEmail,
+  toName,
+  companyName,
+  digestType,
+  dateLabel,
+  stats,
+  employeeRows,
+}) => {
   const statBox = (label, value, color) => `
     <td style="text-align: center; padding: 0 12px;">
       <p style="font-size: 28px; font-weight: 700; color: ${color}; margin: 0;">${value}</p>
       <p style="font-size: 12px; color: #64748b; margin: 4px 0 0;">${label}</p>
     </td>
-  `
+  `;
 
-  const tableRows = employeeRows.map((row) => `
+  const tableRows = employeeRows
+    .map(
+      (row) => `
     <tr style="border-bottom: 1px solid #f1f5f9;">
       <td style="padding: 10px 12px; font-size: 13px; font-weight: 500;">${row.name}</td>
       <td style="padding: 10px 12px; font-size: 12px; color: #64748b;">${row.department}</td>
@@ -231,31 +303,35 @@ const sendDigestEmail = async ({ toEmail, toName, companyName, digestType, dateL
       <td style="padding: 10px 12px; text-align: center; font-size: 13px; color: #f59e0b; font-weight: 600;">${row.late}</td>
       <td style="padding: 10px 12px; text-align: center; font-size: 13px; color: #6366f1; font-weight: 600;">${row.avgHours}h</td>
     </tr>
-  `).join('')
+  `,
+    )
+    .join("");
 
   await sendEmail({
     to: toEmail,
     toName,
-    subject: `${companyName} — ${digestType === 'daily' ? 'Daily' : 'Weekly'} Attendance Digest`,
+    subject: `${companyName} — ${digestType === "daily" ? "Daily" : "Weekly"} Attendance Digest`,
     html: emailWrapper(`
-      <h2 style="margin: 0 0 4px;">${digestType === 'daily' ? 'Daily' : 'Weekly'} Attendance Digest</h2>
+      <h2 style="margin: 0 0 4px;">${digestType === "daily" ? "Daily" : "Weekly"} Attendance Digest</h2>
       <p style="color: #64748b; font-size: 13px; margin: 0 0 24px;">${companyName} · ${dateLabel}</p>
 
       <!-- Summary stats -->
       <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 24px;">
         <table style="width: 100%; border-collapse: collapse;">
           <tr>
-            ${statBox('Present', stats.totalPresent, '#22c55e')}
-            ${statBox('Absent', stats.totalAbsent, '#ef4444')}
-            ${statBox('Late', stats.totalLate, '#f59e0b')}
-            ${statBox('Avg Hours', stats.avgWorkedHours + 'h', '#6366f1')}
-            ${statBox('Overtime', stats.overtimeDays, '#f97316')}
+            ${statBox("Present", stats.totalPresent, "#22c55e")}
+            ${statBox("Absent", stats.totalAbsent, "#ef4444")}
+            ${statBox("Late", stats.totalLate, "#f59e0b")}
+            ${statBox("Avg Hours", stats.avgWorkedHours + "h", "#6366f1")}
+            ${statBox("Overtime", stats.overtimeDays, "#f97316")}
           </tr>
         </table>
       </div>
 
       <!-- Employee breakdown -->
-      ${employeeRows.length > 0 ? `
+      ${
+        employeeRows.length > 0
+          ? `
       <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin-bottom: 16px;">
         <table style="width: 100%; border-collapse: collapse;">
           <thead>
@@ -273,14 +349,61 @@ const sendDigestEmail = async ({ toEmail, toName, companyName, digestType, dateL
           </tbody>
         </table>
       </div>
-      ` : '<p style="color: #94a3b8; font-size: 13px;">No activity recorded for this period.</p>'}
+      `
+          : '<p style="color: #94a3b8; font-size: 13px;">No activity recorded for this period.</p>'
+      }
 
       <p style="color: #94a3b8; font-size: 12px; margin-top: 8px;">
         Log in to ShiftSync to view the full report.
       </p>
     `),
-  })
-}
+  });
+};
+
+// ─── Password Reset Email ─────────────────────────────────────────────────────
+const sendPasswordResetEmail = async ({ toEmail, toName, resetLink }) => {
+  await sendEmail({
+    to: toEmail,
+    toName,
+    subject: "Reset your ShiftSync password",
+    html: emailWrapper(`
+      <h2 style="margin: 0 0 8px;">Reset your password</h2>
+      <p>Hi ${toName},</p>
+      <p>We received a request to reset your ShiftSync password. Click the button below to choose a new one.</p>
+      <a
+        href="${resetLink}"
+        style="display: inline-block; background: #4f46e5; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; margin: 20px 0;"
+      >
+        Reset Password
+      </a>
+      <p style="color: #94a3b8; font-size: 13px;">This link expires in <strong>1 hour</strong>. If you didn't request a password reset, you can safely ignore this email.</p>
+    `),
+  });
+};
+
+// ─── Overtime Alert Email ─────────────────────────────────────────────────────
+const sendOvertimeAlertEmail = async ({
+  toEmail,
+  toName,
+  date,
+  hoursWorked,
+}) => {
+  await sendEmail({
+    to: toEmail,
+    toName,
+    subject: "Overtime recorded on ShiftSync",
+    html: emailWrapper(`
+      <h2 style="margin: 0 0 8px;">Overtime Recorded ⏱</h2>
+      <p>Hi ${toName},</p>
+      <p>You've clocked out with <strong>${hoursWorked} hours</strong> worked on <strong>${date}</strong>, which exceeds the standard 8-hour shift.</p>
+      <div style="background: #fff; border-left: 4px solid #f97316; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 20px 0;">
+        <strong style="font-size: 13px; color: #64748b;">Hours Worked</strong>
+        <p style="font-size: 24px; font-weight: 700; color: #f97316; margin: 6px 0 0;">${hoursWorked}h</p>
+      </div>
+      <p style="color: #94a3b8; font-size: 13px;">This has been recorded in your timesheet. If this was unintentional, please contact your admin.</p>
+    `),
+  });
+};
 
 module.exports = {
   sendInviteEmail,
@@ -290,4 +413,6 @@ module.exports = {
   sendLeaveRequestEmail,
   sendLeaveReviewedEmail,
   sendDigestEmail,
-}
+  sendPasswordResetEmail,
+  sendOvertimeAlertEmail,
+};

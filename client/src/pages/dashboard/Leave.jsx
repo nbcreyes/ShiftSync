@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Plus, X, CalendarDays, CheckCircle, XCircle, Clock } from 'lucide-react'
 import { submitLeave, getMyLeaves, cancelLeave } from '../../api/leave'
+import { getMyBalance } from '../../api/leaveBalance'
 import Sidebar from '../../components/shared/Sidebar'
 import Navbar from '../../components/shared/Navbar'
 import Select from '../../components/shared/Select'
@@ -14,6 +15,8 @@ const LEAVE_TYPES = [
   { value: 'unpaid', label: 'Unpaid' },
   { value: 'other', label: 'Other' },
 ]
+
+const BALANCE_TYPES = ['vacation', 'sick', 'personal']
 
 const STATUS_CONFIG = {
   pending:  { label: 'Pending',  color: 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400',  icon: Clock },
@@ -33,6 +36,8 @@ const getDayCount = (start, end) => {
   return Math.round(diff / (1000 * 60 * 60 * 24)) + 1
 }
 
+const capitalize = (s) => s?.charAt(0).toUpperCase() + s?.slice(1)
+
 const LeaveStatusBadge = ({ status }) => {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.pending
   const Icon = config.icon
@@ -46,29 +51,31 @@ const LeaveStatusBadge = ({ status }) => {
 
 const Leave = () => {
   const [leaves, setLeaves] = useState([])
+  const [balance, setBalance] = useState(null)
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [cancelling, setCancelling] = useState(null)
-  const [form, setForm] = useState({
-    type: '',
-    startDate: '',
-    endDate: '',
-    reason: '',
-  })
+  const [form, setForm] = useState({ type: '', startDate: '', endDate: '', reason: '' })
 
-  const fetchLeaves = async () => {
+  const year = new Date().getFullYear()
+
+  const fetchAll = async () => {
     try {
-      const res = await getMyLeaves()
-      setLeaves(res.data)
+      const [leavesRes, balanceRes] = await Promise.all([
+        getMyLeaves(),
+        getMyBalance(year),
+      ])
+      setLeaves(leavesRes.data)
+      setBalance(balanceRes.data)
     } catch {
-      toast.error('Failed to load leave requests')
+      toast.error('Failed to load leave data')
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { fetchLeaves() }, [])
+  useEffect(() => { fetchAll() }, [])
 
   const handleSubmit = async () => {
     if (!form.type || !form.startDate || !form.endDate) {
@@ -85,7 +92,7 @@ const Leave = () => {
       toast.success('Leave request submitted')
       setShowModal(false)
       setForm({ type: '', startDate: '', endDate: '', reason: '' })
-      fetchLeaves()
+      fetchAll()
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to submit request')
     } finally {
@@ -98,7 +105,7 @@ const Leave = () => {
     try {
       await cancelLeave(id)
       toast.success('Leave request cancelled')
-      fetchLeaves()
+      fetchAll()
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to cancel request')
     } finally {
@@ -110,12 +117,59 @@ const Leave = () => {
   const approvedCount = leaves.filter((l) => l.status === 'approved').length
   const rejectedCount = leaves.filter((l) => l.status === 'rejected').length
 
+  const getRemaining = (type) => {
+    if (!balance) return null
+    const b = balance.balances[type]
+    if (!b || b.allowed === 0) return null
+    return b.allowed - b.used
+  }
+
   return (
     <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950">
       <Sidebar />
       <main className="flex-1 overflow-y-auto">
         <Navbar title="Leave Requests" />
         <div className="p-6 space-y-5 max-w-3xl mx-auto animate-fade-in">
+
+          {/* Balance cards */}
+          {balance && (
+            <div className="card shadow-soft p-5">
+              <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-3">
+                {year} Leave Balance
+              </h3>
+              <div className="grid grid-cols-3 gap-3">
+                {BALANCE_TYPES.map((type) => {
+                  const b = balance.balances[type]
+                  const remaining = b.allowed - b.used
+                  const pct = b.allowed > 0 ? Math.max(0, (remaining / b.allowed) * 100) : 0
+                  return (
+                    <div key={type} className="bg-slate-50 dark:bg-slate-700/40 rounded-xl p-3">
+                      <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 capitalize mb-2">{type}</p>
+                      {b.allowed === 0 ? (
+                        <p className="text-xs text-slate-400">Not set</p>
+                      ) : (
+                        <>
+                          <p className="text-lg font-bold text-slate-900 dark:text-white">
+                            {remaining}
+                            <span className="text-xs font-normal text-slate-400 ml-1">/ {b.allowed} days</span>
+                          </p>
+                          <div className="mt-2 h-1.5 bg-slate-200 dark:bg-slate-600 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                pct > 50 ? 'bg-green-500' : pct > 20 ? 'bg-amber-500' : 'bg-red-500'
+                              }`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1">{b.used} used</p>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Summary + action */}
           <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -133,10 +187,7 @@ const Leave = () => {
                 <p className="text-xs text-slate-400 mt-0.5">Rejected</p>
               </div>
             </div>
-            <button
-              onClick={() => setShowModal(true)}
-              className="btn-primary flex items-center gap-2"
-            >
+            <button onClick={() => setShowModal(true)} className="btn-primary flex items-center gap-2">
               <Plus size={15} />
               New Request
             </button>
@@ -182,16 +233,12 @@ const Leave = () => {
                       )}
                       {leave.adminNote && (
                         <div className="mt-2.5 flex items-start gap-1.5">
-                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 shrink-0">
-                            Admin note:
-                          </span>
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 shrink-0">Admin note:</span>
                           <span className="text-xs text-slate-600 dark:text-slate-300">{leave.adminNote}</span>
                         </div>
                       )}
                       {leave.reviewedBy && (
-                        <p className="text-xs text-slate-400 mt-1">
-                          Reviewed by {leave.reviewedBy.name}
-                        </p>
+                        <p className="text-xs text-slate-400 mt-1">Reviewed by {leave.reviewedBy.name}</p>
                       )}
                     </div>
                     {leave.status === 'pending' && (
@@ -245,13 +292,19 @@ const Leave = () => {
                   onChange={(val) => setForm({ ...form, type: val })}
                   placeholder="Select type..."
                 />
+                {/* Show remaining balance for selected type */}
+                {form.type && getRemaining(form.type) !== null && (
+                  <p className="text-xs mt-1.5 text-slate-500 dark:text-slate-400">
+                    Remaining: <strong className={getRemaining(form.type) <= 2 ? 'text-red-500' : 'text-green-500'}>
+                      {getRemaining(form.type)} day{getRemaining(form.type) !== 1 ? 's' : ''}
+                    </strong>
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wide">
-                    From
-                  </label>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wide">From</label>
                   <DatePicker
                     value={form.startDate}
                     onChange={(val) => setForm({ ...form, startDate: val })}
@@ -260,9 +313,7 @@ const Leave = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wide">
-                    To
-                  </label>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wide">To</label>
                   <DatePicker
                     value={form.endDate}
                     onChange={(val) => setForm({ ...form, endDate: val })}
@@ -293,17 +344,8 @@ const Leave = () => {
             </div>
 
             <div className="flex gap-2.5 mt-5">
-              <button
-                onClick={() => setShowModal(false)}
-                className="btn-secondary flex-1"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={submitting}
-                className="btn-primary flex-1"
-              >
+              <button onClick={() => setShowModal(false)} className="btn-secondary flex-1">Cancel</button>
+              <button onClick={handleSubmit} disabled={submitting} className="btn-primary flex-1">
                 {submitting ? 'Submitting...' : 'Submit Request'}
               </button>
             </div>
